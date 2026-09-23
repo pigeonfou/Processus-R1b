@@ -38,15 +38,19 @@ function verifyHs256(token) {
 }
 
 function signToken(user) {
-  const payload = {
+  const base = {
     id: user.id,
     email: user.email,
     role: user.role,
-    full_name: user.full_name,
-    exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600
+    full_name: user.full_name
   };
-  if (jwt) return jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
-  return signHs256(payload);
+  if (jwt) {
+    return jwt.sign(base, JWT_SECRET, { expiresIn: '7d' });
+  }
+  return signHs256({
+    ...base,
+    exp: Math.floor(Date.now() / 1000) + 7 * 24 * 3600
+  });
 }
 
 function verifyToken(token) {
