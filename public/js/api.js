@@ -24,8 +24,10 @@ const API = {
     }
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const res = await fetch(`/api${path}`, { ...options, headers });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || res.statusText);
+    const text = await res.text();
+    let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || res.statusText }; }
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status + ' ' + (res.statusText || '')));
     return data;
   },
 

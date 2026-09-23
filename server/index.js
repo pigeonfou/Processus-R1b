@@ -2,13 +2,13 @@ try { require('dotenv').config(); } catch (_) {}
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
-const cors = require('cors');
+let cors; try { cors = require('cors'); } catch { cors = () => (req,res,next)=>next(); }
 const { initSchema, DB_PATH } = require('./db');
-const { seedIfEmpty } = require('./seed');
+const { ensureDemoUsers } = require('./seed');
 
 initSchema();
 try {
-  seedIfEmpty();
+  ensureDemoUsers();
 } catch (err) {
   console.error('Seed automatique échoué:', err);
 }

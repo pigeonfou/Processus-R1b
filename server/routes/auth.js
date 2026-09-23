@@ -5,6 +5,24 @@ const { hashPassword, verifyPassword } = require('../password');
 
 const router = express.Router();
 
+/** Diagnostic public (sans secret) pour déboguer la connexion */
+router.get('/status', (_req, res) => {
+  try {
+    const count = Number(db.prepare('SELECT COUNT(*) AS c FROM users').get().c);
+    const admin = db.prepare('SELECT id, email FROM users WHERE email = ?').get('admin@rd.local');
+    res.json({
+      ok: true,
+      users_count: count,
+      has_admin: !!admin,
+      hint: count === 0
+        ? 'Aucun utilisateur — redémarrez le service pour lancer le seed'
+        : 'Utilisez admin@rd.local / admin123'
+    });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 router.post('/register', (req, res) => {
   const { email, password, full_name, role, initials } = req.body || {};
   if (!email || !password || !full_name) {
@@ -13,7 +31,7 @@ router.post('/register', (req, res) => {
   if (password.length < 6) {
     return res.status(400).json({ error: 'Mot de passe trop court (min 6)' });
   }
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email.toLowerCase());
+  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(String(email).toLowerCase().trim());
   if (existing) return res.status(409).json({ error: 'Email déjà utilisé' });
 
   const hash = hashPassword(password);
@@ -23,7 +41,7 @@ router.post('/register', (req, res) => {
       `INSERT INTO users (email, password_hash, full_name, role, initials)
        VALUES (?, ?, ?, ?, ?)`
     )
-    .run(email.toLowerCase(), hash, full_name, role || 'membre', init);
+    .run(String(email).toLowerCase().trim(), hash, full_name, role || 'membre', init);
 
   const user = db.prepare('SELECT id, email, full_name, role, initials FROM users WHERE id = ?').get(info.lastInsertRowid);
   const token = signToken(user);
@@ -31,17 +49,44 @@ router.post('/register', (req, res) => {
 });
 
 router.post('/login', (req, res) => {
-  const { email, password } = req.body || {};
-  if (!email || !password) return res.status(400).json({ error: 'email et password requis' });
-  const user = db.prepare('SELECT * FROM users WHERE email = ?').get(String(email).toLowerCase().trim());
-  if (!user) {
-    return res.status(401).json({ error: 'Identifiants invalides' });
+  try {
+    const email = String((req.body && req.body.email) || '')
+      .toLowerCase()
+      .trim();
+    const password = String((req.body && req.body.password) || '');
+    if (!email || !password) {
+      return res.status(400).json({ error: 'email et password requis' });
+    }
+
+    const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email);
+    if (!user) {
+      console.warn('[auth] Login échoué: utilisateur inconnu', email);
+      return res.status(401).json({ error: 'Identifiants invalides (utilisateur inconnu)' });
+    }
+
+    const hash = user.password_hash;
+    if (!hash) {
+      console.warn('[auth] Login échoué: pas de hash pour', email);
+      return res.status(401).json({ error: 'Identifiants invalides (compte corrompu — redémarrez le service)' });
+    }
+
+    if (!verifyPassword(password, hash)) {
+      console.warn('[auth] Login échoué: mauvais mot de passe pour', email, 'hash_prefix=', String(hash).slice(0, 12));
+      return res.status(401).json({ error: 'Identifiants invalides (mot de passe)' });
+    }
+
+    const safe = {
+      id: user.id,
+      email: user.email,
+      full_name: user.full_name,
+      role: user.role,
+      initials: user.initials
+    };
+    res.json({ user: safe, token: signToken(safe) });
+  } catch (e) {
+    console.error('[auth] Exception login', e);
+    res.status(500).json({ error: 'Erreur serveur: ' + e.message });
   }
-  if (!verifyPassword(password, user.password_hash)) {
-    return res.status(401).json({ error: 'Identifiants invalides' });
-  }
-  const safe = { id: user.id, email: user.email, full_name: user.full_name, role: user.role, initials: user.initials };
-  res.json({ user: safe, token: signToken(safe) });
 });
 
 router.get('/me', authRequired, (req, res) => {
@@ -53,9 +98,7 @@ router.get('/me', authRequired, (req, res) => {
 });
 
 router.get('/users', authRequired, (req, res) => {
-  const users = db
-    .prepare('SELECT id, email, full_name, role, initials FROM users ORDER BY full_name')
-    .all();
+  const users = db.prepare('SELECT id, email, full_name, role, initials FROM users ORDER BY full_name').all();
   res.json({ users });
 });
 
