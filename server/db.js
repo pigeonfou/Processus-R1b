@@ -12,7 +12,7 @@ function ensureDir(filePath) {
 ensureDir(DB_PATH);
 
 const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL;');
+try { db.exec('PRAGMA journal_mode = DELETE;'); } catch (_) {}
 db.exec('PRAGMA foreign_keys = ON;');
 
 function initSchema() {
